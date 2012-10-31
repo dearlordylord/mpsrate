@@ -1,0 +1,418 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<Module>
+    <ModulePrefs title="Mpsrate gadget" directory_title="Mpsrate gadget" description="Mpsrate gadget for mpsrate"
+                 author="Megaplan" author_affiliation="Megaplan"
+                 author_location="Moscow, Erefia" height="100"
+                 screenshot='#staticResourceUrl("ru.megaplan.jira.plugins.mpsrate:mpsrategadget", "mpsrate-screenshot.png")'
+                 thumbnail='#staticResourceUrl("ru.megaplan.jira.plugins.mpsrate:mpsrategadget", "mpsrate-thumb.png")'>
+        <Optional feature="gadget-directory">
+            <Param name="categories">
+                JIRA
+            </Param>
+        </Optional>
+        <Require feature="setprefs" />
+        <Require feature="views" />
+        <Optional feature="atlassian.util" />
+        <Optional feature='auth-refresh' />
+        <Require feature="settitle"/>
+        <Require feature="dynamic-height"/>
+        <Require feature="oauthpopup" />
+        #oauth
+        #supportedLocales("gadget.common,gadget.stats")
+    </ModulePrefs>
+    <UserPref name="isConfigured" datatype="hidden" default_value="false" />
+    <UserPref name="users" datatype="hidden" default_value="NULL"/>
+    <UserPref name="dateStart" datatype="hidden" default_value=""/>
+    <UserPref name="dateEnd" datatype="hidden" default_value=""/>
+    <UserPref name="daysBefore" datatype="hidden" default_value="30"/>
+    <UserPref name="isCumulative" datatype="hidden" default_value="true" />
+    <UserPref name="showOldRates" datatype="hidden" default_value="true" />
+
+    <UserPref name="refresh" datatype="hidden" default_value="false" />
+    <Content type="html" view="profile,canvas,home">
+        <![CDATA[
+        #requireResource("com.atlassian.jira.gadgets:autocomplete")
+        #requireResource("ru.megaplan.jira.plugins.mpsrate:mpsrate-resources")
+        #includeResources()
+        <script type="text/javascript">
+        (function ()
+        {
+            var gadget = AJS.Gadget({
+                baseUrl: "__ATLASSIAN_BASE_URL__",
+                useOauth: "/rest/gadget/1.0/currentUser",
+                config: {
+                    descriptor: function (args)
+                    {
+
+                        var gadget = this;
+
+
+                        return  {
+                            action: "/rest/mpsrate/latest/mpsrategadget/validate",
+                            theme : function ()
+                            {
+                                if (gadgets.window.getViewportDimensions().width < 450){
+                                        return "gdt top-label";
+                                    }
+                                    else
+                                    {
+                                        return "gdt";
+                                    }
+                            }(),
+
+                            fields: [
+                                GB.gadget.fields.picker(gadget, "users", args.users, "Users"),
+                                GB.gadget.fields.datePicker(gadget, "Date Start", "dateStart"),
+                                GB.gadget.fields.datePicker(gadget, "Date End", "dateEnd"),
+                                AJS.gadget.fields.days(gadget, "daysBefore"),
+                                 {
+                                    userpref: "isCumulative",
+                                    label: "График кумулятивен",
+                                    type: "select",
+                                    selected: this.getPref("isCumulative"),
+                                    options:[
+                                        {
+                                            label:this.getMsg("gadget.common.yes"),
+                                            value:"true"
+                                        },
+                                        {
+                                            label:this.getMsg("gadget.common.no"),
+                                            value:"false"
+                                        }
+                                    ]
+                                },
+                                {
+                                    userpref: "showOldRates",
+                                    label: "Учитывать в графике старые оценки",
+                                    type: "select",
+                                    selected: this.getPref("showOldRates"),
+                                    options:[
+                                        {
+                                            label:this.getMsg("gadget.common.yes"),
+                                            value:"true"
+                                        },
+                                        {
+                                            label:this.getMsg("gadget.common.no"),
+                                            value:"false"
+                                        }
+                                    ]
+                                },
+                                AJS.gadget.fields.nowConfigured()
+                            ]
+                        };
+                    },
+                    args: function() {
+                        return [
+                            {
+                                key: "users",
+                                ajaxOptions: "/rest/mpsrate/latest/who/group/mps-support"
+                            }
+                        ];
+                    }()
+                },
+                view: {
+                    enableReload: true,
+                    onResizeReload: true,
+                    template: function (args)
+                    {
+
+
+
+                        var gadget = this;
+
+                        var dateStart = args.data[0].ratesSummary.dateStart;
+                        var dateEnd = args.data[0].ratesSummary.dateEnd;
+                        gadgets.window.setTitle("MPS Rate Gadget. Оценки за период : " + dateStart + " - " + dateEnd);
+
+
+                        gadget.getView().addClass("chart").empty();
+
+                        var jqSelector = function (str) {
+                            return str.replace(/([;&,\.\+\*\~':"\!\^#$%@\[\]\(\)=>\|])/g, '\\$1');
+                        };
+                        var getObjectLength = function(o) {
+                            var l = 0;
+                            for (var i in o) {
+                                l++;
+                            }
+                            return l;
+                        }
+                        var getRateDetailsAsArray = function(rateDetailsObject) {
+                            var rateItems = [];
+                            for (var rate in rateDetailsObject) {
+                                var rateObject = new Object();
+                                rateObject['details'] = rateDetailsObject[rate];
+                                var l = 0;
+                                for (var i = 0; i < rateObject.details.length; ++i) {
+                                    innerLoop: for (rateCount in rateObject.details[i]) { rateCount = rateObject.details[i][rateCount]; break innerLoop; }
+                                    l += rateCount;
+                                }
+                                rateObject['l'] = l;
+                                rateObject['rate'] = parseInt(rate);
+                                rateItems.push(rateObject);
+                            }
+                            return rateItems;
+                        };
+
+                        var getSummaryTable = function (argData) {
+                            var summaryTable = AJS.gadgets.templater.Table({
+                                descriptor: function (args) {
+                                    return {
+                                        cols: function() {
+                                            var cls = [];
+                                            var managerName = args.chartData.usernames.join(', ');
+                                            cls.push({header: "Менеджер техподдержки:"});
+                                            cls.push({header: managerName, theme: "manager-name-header"});
+                                            return cls;
+                                        }()
+                                    };
+                                },
+                                sortable: false,
+                                args: [{key: "chartData", data: argData}]
+                            });
+                            var tableDiv = jQuery('<div/>');
+                            summaryTable.addCallback(function (fragment) {
+                                tableDiv.append(fragment);
+                            });
+                            summaryTable.build();
+                            return tableDiv;
+                        };
+
+
+
+                        var getChartContainer = function (data) {
+                            var id;
+                            if (data.userLogins.length == 1) id = 'chart-'+data.userLogins[0];
+                            else id = 'chart-all';
+                            var chartDiv = jQuery('<div/>',{id: id});
+                            return chartDiv;
+                        };
+                        var chartImg;
+                        var getChartImg = function (data) {
+                            var chartDiv = getChartContainer(data);
+                            //gadget.getView().append(chartDiv);
+                            AJS.$(chartDiv, gadget.getView()).get(0).innerHTML += "<img style='display:none' src='" + gadget.getBaseUrl() + "/charts?filename=" + data.ratesGraph.location +
+                            "' height='" + data.ratesGraph.height + "' width='" + data.ratesGraph.width + "' />";
+                            gadget.showLoading();
+                            chartImg = AJS.$("img", chartDiv);
+                            AJS.$(chartImg, gadget.getView()).load(function () {
+                                AJS.$(this).show();
+                            });
+                            return chartDiv;
+                        };
+
+                        var getDetailsDiv = function() {
+                            var maxRates = 15;
+                            var hasRatesOverflow = false;
+                            var result = jQuery('<div/>');
+                            var rates = data.ratesDetails.rates;
+                            var colorMap = data.ratesDetails.colorMap;
+                            var ratesArray = getRateDetailsAsArray(data.ratesDetails.rates);
+                            ratesArray.sort(function(a,b) {
+                                 return (a.rate > b.rate)?1:(a.rate < b.rate)?-1:0;
+                            });
+                            var layoutTable = jQuery('<table/>', {class: 'aui'});
+                            var layoutThead = jQuery('<thead/>');
+                            var layoutTbody = jQuery('<tbody/>');
+                            var layoutTr = jQuery('<tr/>');
+                            for (var j = 0; j < ratesArray.length; ++j) {
+                                var innerTd = jQuery('<td/>');
+                                innerTd.css('vertical-align','top');
+                                var rateValue = ratesArray[j].rate;
+                                var rateColor = colorMap[rateValue];
+                                var innerTh = jQuery('<th/>', {text: data.rateNames[rateValue]});
+                                innerTh.css('color', '#'+rateColor);
+                                var ul = jQuery('<ul/>',{type: 'none'});
+                                innerTd.append(ul);
+                                for (var k = 0; k < ratesArray[j].details.length; ++k) {
+                                    for (issueKey in ratesArray[j].details[k]) break;
+                                    for (rateText in ratesArray[j].details[k]) rateText = ratesArray[j].details[k][rateText];
+                                    var a = jQuery('<a/>', {href: gadget.getBaseUrl()+'/browse/'+issueKey+'?page=ru.megaplan.jira.plugins.mpsrate:issue-rates-panel',
+                                        text: ' [ ' + rateText + ' ] '
+                                    });
+                                    var li = jQuery('<li/>', {text: issueKey});
+                                    if (k >= maxRates) {
+                                        hasRatesOverflow = true;
+                                        li.addClass('rate-oversize');
+                                        li.hide();
+                                    }
+                                    li.append(a);
+                                    ul.append(li);
+                                }
+                                layoutTr.append(innerTd);
+                                layoutThead.append(innerTh);
+                            }
+                            layoutTbody.append(layoutTr);
+                            layoutTable.append(layoutThead);
+                            layoutTable.append(layoutTbody);
+                            var moreButton = function() {
+                                var onText = "Показать все";
+                                var offText = "Показать первые 15";
+                                var result = jQuery('<a/>', {click: function() {
+                                                                var that = jQuery(this);
+                                                                var oversizeItems = layoutTr.find('.rate-oversize');
+                                                                if (that.text()==onText) {
+                                                                    that.text(offText);
+                                                                    oversizeItems.show();
+                                                                } else {
+                                                                    that.text(onText);
+                                                                    oversizeItems.hide();
+                                                                }
+                                                                gadget.resize();
+
+
+                                                            }, text: onText});
+                                return result;
+                            }();
+                            var moreButtonWrapper = jQuery('<p/>');
+                            moreButtonWrapper.css('margin-top','10px');
+                            moreButtonWrapper.css('padding-top','10px');
+                            moreButtonWrapper.css('border-top','1px solid');
+                            moreButtonWrapper.css('border-color','#b8b8b8');
+                            //moreButtonWrapper.css('border-bottom','1px solid');
+                            moreButtonWrapper.append(moreButton);
+                            if (hasRatesOverflow) result.append(moreButtonWrapper);
+                            result.append(layoutTable);
+                            return result;
+                        }
+
+                        var getSummaryAggregateDiv = function(argData) {
+                            var result = jQuery('<div/>');
+
+                            var summaryAggregateTable = AJS.gadgets.templater.Table({
+                                descriptor: function (args) {
+                                    return {
+                                        cols: function() {
+                                            var cls = [];
+                                            var managerName = args.chartData.usernames.join(', ');
+                                            var suffix = (args.chartData.usernames.length > 1)?'ов':'а';
+                                            cls.push({header: "Оценки по тикетам за выбранный период:", theme: "rate-col-head"});
+                                            cls.push({header: "Найдено оценок: " + args.chartData.ratesSummary.summaryFound, theme: "rate-col-head-second"});
+                                            return cls;
+                                        }(),
+                                        data: function () {
+                                            var rows = [];
+                                            var fullSum = 0;
+                                            var rateItems = getRateDetailsAsArray(argData.ratesDetails.rates);
+                                            for (var i = 0; i < rateItems.length; ++i) {
+                                                fullSum += rateItems[i].l;
+                                            }
+                                            rateItems.sort(function(a,b){
+                                                return (a.rate > b.rate)?-1:(a.rate < b.rate)?1:0;
+                                            });
+                                            for (var i = 0; i < rateItems.length; ++i) {
+                                                var rateItem = rateItems[i];
+                                                var l = rateItem.l;
+                                                rows.push([{label: argData.rateNames[rateItem.rate]},{label: l+" ( "+(l/fullSum*100).toFixed(1)+"% )"}]);
+                                            }
+                                            return rows;
+
+                                        }()
+                                    };
+                                },
+                                sortable: false,
+                                args: [{key: "chartData", data: argData}]
+                            });
+                            summaryAggregateTable.addCallback(function (fragment) {
+                                result.append(fragment);
+                            });
+                            summaryAggregateTable.build();
+                            return result;
+                        }
+
+                        for (var i = 0; i < args.data.length; ++i) {
+                            var data = args.data[i];
+                            var summaryDiv = getSummaryTable(data);
+                            var summaryAggregateDiv = getSummaryAggregateDiv(data);
+                            var chartDiv = getChartImg(data);
+                            var detailsDiv = getDetailsDiv(data);
+                            var userDiv = jQuery('<div/>');
+                            var userDetailsId;
+                            if (data.userLogins.length == 1) {
+                                userDetailsId = 'details-'+data.userLogins[0];
+                            } else {
+                                userDetailsId = 'details-all';
+                            }
+                            var userDetailsDiv = jQuery('<div/>', {class: 'user-details', id: userDetailsId});
+                            userDetailsDiv.hide();
+
+                            var switchDetails = function() {
+                                var ud = userDetailsDiv;
+                                return function() {
+                                    ud.toggle();
+                                    gadget.resize();
+                                    var that = jQuery(this);
+                                    if (that.text() == "Подробнее") {
+                                        that.text("Кратко");
+                                    } else {
+                                        that.text("Подробнее");
+                                    }
+                                    return false;
+                                }
+                            }();
+                            var hideButton = jQuery('<a/>',{click: switchDetails,
+                                                    target: '_self',
+                                                    href: '#',
+                                                    text:'Подробнее',
+                                                    class: 'switchButton'});
+                            userDiv.append(summaryDiv);
+                            userDiv.append(summaryAggregateDiv);
+                            userDetailsDiv.append(chartDiv);
+                            userDetailsDiv.append(detailsDiv);
+
+                            userDiv.append(userDetailsDiv);
+
+                            summaryAggregateDiv.append(hideButton);
+                            summaryAggregateDiv.find('table').css('margin','0px');
+                            summaryAggregateDiv.css('margin-bottom', '10px');
+                            hideButton.css('text-align','left');
+
+                            gadget.getView().append(userDiv);
+                        }
+
+                        jQuery('table.aui thead th').css('white-space','normal');
+                        jQuery('table.aui .manager-name-header').css('font-weight','normal');
+
+                        gadget.hideLoading();
+                        gadget.resize();
+
+                    },
+                    args: [{
+                        key: "data",
+                        ajaxOptions: function () {
+                                var width = Math.round(gadgets.window.getViewportDimensions().width * 0.9);
+                                //canvas mode needs some more room to the right for the data table.
+                                if(gadgets.views.getCurrentView().getName() === "canvas") {
+                                    width = Math.round(gadgets.window.getViewportDimensions().width * 0.6);
+                                }
+                                if (width < 150){
+                                    width = 150;
+                                }
+                                var height = Math.round(width*2/3);
+                                return {
+                                    url: "/rest/mpsrate/latest/mpsrategadget/generate",
+                                    data:  {
+                                        users : gadgets.util.unescapeString(this.getPref("users")),
+                                        dateStart : gadgets.util.unescapeString(this.getPref("dateStart")),
+                                        dateEnd : gadgets.util.unescapeString(this.getPref("dateEnd")),
+                                        daysBefore : gadgets.util.unescapeString(this.getPref("daysBefore")),
+                                        isCumulative : gadgets.util.unescapeString(this.getPref("isCumulative")),
+                                        showOldRates : gadgets.util.unescapeString(this.getPref("showOldRates")),
+                                        width: width,
+                                        height: height
+                                    }
+                                };
+                        }
+                    }]
+                }
+            });
+        })();
+        </script>
+
+        <div id="template" style="display:none">
+
+        </div>
+        ]]>
+    </Content>
+</Module>

@@ -1,0 +1,28 @@
+#if ($ratesForIssues)
+<table class="aui">
+    <thead>
+        <tr>
+        <th>Whom</th>
+        <th>Ratings</th>
+        </tr>
+    </thead>
+    <tbody>
+    #foreach ($key in $ratesForIssues.keySet())
+        <tr>
+            <td>$key</td>
+            <td>
+                <ul class="menu">
+                #set($issueMap = $ratesForIssues.get($key))
+                #foreach($issueKey in $issueMap.keySet())
+                    <li>
+                        <a href="$baseUrl/browse/$issueKey">$issueKey</a> : $issueMap.get($issueKey)
+                    </li>
+                #end
+                </ul>
+            </td>
+        </tr>
+    #end
+    </tbody>
+</table>
+
+#end

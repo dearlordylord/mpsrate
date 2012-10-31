@@ -1,0 +1,105 @@
+<atlassian-plugin key="${project.groupId}.${project.artifactId}" name="${project.name}" plugins-version="2">
+    <plugin-info>
+        <description>${project.description}</description>
+        <version>${project.version}</version>
+        <vendor name="${project.organization.name}" url="${project.organization.url}" />
+    </plugin-info>
+
+    <customfield-type key="rate" name="Rate field"
+                      class="ru.megaplan.jira.plugins.mpsrate.customfield.RateCFType">
+        <resource type="velocity" name="view" location="templates/plugins/fields/view/view-number.vm"/>
+       <!-- <resource type="velocity" name="column-view" location="templates/plugins/fields/view/view-limited-text.vm"/> -->
+        <resource type="velocity" name="edit" location="templates/fields/edit/edit-rate.vm"/>
+        <resource type="velocity" name="xml" location="templates/plugins/fields/xml/xml-number.vm"/>
+    </customfield-type>
+
+    <customfield-type key="workers" name="MPS Last Worker"
+                      class="ru.megaplan.jira.plugins.mpsrate.customfield.WorkerCfType">
+        <description>Last worker field for MPS Rates.</description>
+
+        <resource type="velocity" name="column-view" location="templates/plugins/fields/view/column-view-user.vm"/>
+        <resource type="velocity" name="view" location="templates/plugins/fields/view/view-user.vm"/>
+        <resource type="velocity" name="edit" location="templates/fields/edit/edit-worker.vm"/>
+        <resource type="velocity" name="xml" location="templates/plugins/fields/xml/xml-user.vm"/>
+    </customfield-type>
+
+    <customfield-searcher key="userpickersearcher" name="User Picker Searcher"
+                          i18n-name-key="admin.customfield.searcher.userpickersearcher.name"
+                          class="com.atlassian.jira.issue.customfields.searchers.UserPickerSearcher">
+        <description key="admin.customfield.searcher.userpickersearcher.desc">Allow to search for a user using a userpicker.</description>
+        <resource type="velocity" name="label" location="templates/plugins/fields/view-searcher/label-searcher-user.vm"/>
+        <resource type="velocity" name="search" location="templates/plugins/fields/edit-searcher/search-userpicker.vm"/>
+        <resource type="velocity" name="view" location="templates/plugins/fields/view-searcher/view-searcher-basictext.vm"/>
+        <valid-customfield-type package="ru.megaplan.jira.plugins.mpsrate" key="workers"/>
+    </customfield-searcher>
+
+    <component key="commentarius-tx-processor" name="Transactional Annotation Processor"
+               class="com.atlassian.activeobjects.external.TransactionalAnnotationProcessor">
+        <decription>Processes @Transactional annotations.</decription>
+    </component>
+
+    <component key="rate-ao-service"
+               name="Rate Service"
+               class="ru.megaplan.jira.plugins.mpsrate.ao.impl.RateServiceImpl"/>
+
+    <component-import key="ao-import" name="Active Objects service" interface="com.atlassian.activeobjects.external.ActiveObjects">
+        <description>Component to access Active Objects functionality from the plugin</description>
+    </component-import>
+
+    <component-import key="workflowConfigComponent" interface="ru.megaplan.jira.plugins.workflow.mps.utils.service.WorkflowSettingsService"/>
+
+    <component-import key="workflow-search" interface="ru.megaplan.jira.plugins.history.search.HistorySearchManager"/>
+
+    <component-import key="megaplan-permission-group-manager-import" name="Permission Manager service"
+                      interface="ru.megaplan.jira.plugins.permission.manager.ao.MegaPermissionGroupManager">
+        <description>Component to access Mega Permissions</description>
+    </component-import>
+
+    <component key="eventListener" class="ru.megaplan.jira.plugins.mpsrate.listener.MPSRateAdditionalListener">
+        <description>MPS Rate Listener.</description>
+    </component>
+
+
+    <ao key="rate-ao">
+        <entity>ru.megaplan.jira.plugins.mpsrate.ao.entity.Rate</entity>
+        <entity>ru.megaplan.jira.plugins.mpsrate.ao.entity.Worker</entity>
+      <!--  <upgradeTask>ru.megaplan.jira.plugins.mpsrate.ao.upgrade.UpgradeTask</upgradeTask> -->
+    </ao>
+
+    <web-resource key="mpsrate-resources" name="Resources">
+        <resource type="download" name="jquery.ui.datepicker.js" location="js/jquery.ui.datepicker.js"/>
+        <resource type="download" name="jquery.ui.datepicker.css" location="css/jquery.ui.datepicker.css"/>
+
+        <dependency>jira.webresources:jira-global</dependency>
+        <resource type="download" name="pickers.js" location="js/pickers.js" />
+    </web-resource>
+
+    <gadget key="mpsrategadget" name="mpsrategadget" location="gadget/mpsrategadget.xml">
+        <param name="roles-required">browse</param>
+        <resource type="download" name="mpsrate-screenshot.png" location="images/mpsrate-screenshot.png"/>
+        <resource type="download" name="mpsrate-thumb.png" location="images/mpsrate-thumb.png"/>
+    </gadget>
+
+    <rest key="gadgetRESTpoints" path="/mpsrate" version="1.0" description="Provides REST endpoints used to display gadget contents.">
+    </rest>
+
+   <issue-tabpanel key="issue-rates-panel" name="Issue Rates Panel"
+                    class="ru.megaplan.jira.plugins.mpsrate.panel.IssueRatesPanel">
+        <description>Issue tab panel that shows issue ratings.</description>
+        <label>Rates</label>
+        <resource type="velocity" name="view" location="templates/panel/rates.vm"/>
+        <supports-ajax-load>true</supports-ajax-load>
+    </issue-tabpanel>
+
+
+
+    <!-- <project-tabpanel key="issue-rates-project-panel" name="Issue Rates Project Panel"
+                      class="ru.megaplan.jira.plugins.mpsrate.panel.RatesProjectPanel">
+        <label>MPS Rates</label>
+        <order>20</order>
+        <resource type="velocity" name="view"
+                  location="templates/panel/project-rates-panel.vm"/>
+        <param name="noTitle">true</param>
+    </project-tabpanel>  -->
+
+</atlassian-plugin>

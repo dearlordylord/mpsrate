@@ -1,0 +1,17 @@
+#if ($rates)
+Full rating : $!fullRating , average rating : $!averageRating<br/>
+<table class="aui">
+    <thead>
+        <tr>
+            <th>Кто оценил</th><th>Кого оценил</th><th>Оценка</th><th>Когда</th>
+        </tr>
+    </thead>
+    <tbody>
+        #foreach($rate in $rates)
+        <tr><td>$rate.who</td><td>$rate.whom</td><td>$rate.rating</td><td>$rate.when</td></tr>
+        #end
+    </tbody>
+</table>
+#else
+No rates yet
+#end

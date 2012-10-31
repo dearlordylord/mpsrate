@@ -1,0 +1,7 @@
+#customControlHeader ($action $customField.id $customField.name $fieldLayoutItem.required $displayParameters $auiparams)
+#if ($canEdit)
+    #userPicker ($action $customField.id $value false $null "" $canPerformAjaxSearch $ajaxLimit)
+#else
+    #if($value) $value #else Не указан #end
+#end
+#customControlFooter ($action $customField.id $fieldLayoutItem.fieldDescription $displayParameters $auiparams)
