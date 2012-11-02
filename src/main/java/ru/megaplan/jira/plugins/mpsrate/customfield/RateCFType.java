@@ -1,5 +1,6 @@
 package ru.megaplan.jira.plugins.mpsrate.customfield;
 
+import com.atlassian.core.util.map.EasyMap;
 import com.atlassian.crowd.embedded.api.User;
 import com.atlassian.jira.imports.project.customfield.ProjectCustomFieldImporter;
 import com.atlassian.jira.imports.project.customfield.ProjectImportableCustomField;
@@ -13,6 +14,7 @@ import com.atlassian.jira.issue.customfields.GroupSelectorField;
 import com.atlassian.jira.issue.customfields.MultipleSettableCustomFieldType;
 import com.atlassian.jira.issue.customfields.SortableCustomField;
 import com.atlassian.jira.issue.customfields.config.item.SettableOptionsConfigItem;
+import com.atlassian.jira.issue.customfields.impl.AbstractCustomFieldType;
 import com.atlassian.jira.issue.customfields.impl.AbstractSingleFieldType;
 import com.atlassian.jira.issue.customfields.impl.FieldValidationException;
 import com.atlassian.jira.issue.customfields.manager.GenericConfigManager;
@@ -24,6 +26,7 @@ import com.atlassian.jira.issue.customfields.persistence.CustomFieldValuePersist
 import com.atlassian.jira.issue.customfields.persistence.PersistenceFieldType;
 import com.atlassian.jira.issue.customfields.statistics.SelectStatisticsMapper;
 import com.atlassian.jira.issue.customfields.view.CustomFieldParams;
+import com.atlassian.jira.issue.customfields.view.CustomFieldParamsImpl;
 import com.atlassian.jira.issue.fields.CustomField;
 import com.atlassian.jira.issue.fields.config.FieldConfig;
 import com.atlassian.jira.issue.fields.config.FieldConfigItemType;
@@ -45,14 +48,17 @@ import com.atlassian.jira.user.util.UserManager;
 import com.atlassian.jira.util.ErrorCollection;
 import com.atlassian.jira.util.ErrorCollection.Reason;
 import com.atlassian.jira.util.NotNull;
+import com.atlassian.jira.util.ObjectUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TermQuery;
 import ru.megaplan.jira.plugins.mpsrate.ao.RateService;
+import webwork.action.ServletActionContext;
 
 import javax.annotation.Nullable;
+import javax.servlet.http.HttpServletRequest;
 import java.util.*;
 
 /**
@@ -66,9 +72,38 @@ import java.util.*;
  * <dd>{@link String} of Option ID</dd>
  * </dl>
  */
-public class RateCFType extends AbstractSingleFieldType<Option>
-        implements MultipleSettableCustomFieldType<Option, Option>, SortableCustomField<String>, GroupSelectorField, ProjectImportableCustomField, RestAwareCustomFieldType, RestCustomFieldTypeOperations
+public class RateCFType extends AbstractCustomFieldType<Map<String,Option>,Option>
+        implements MultipleSettableCustomFieldType<Map<String,Option>,Option>, SortableCustomField<Map<String,Option>>
 {
+
+
+    public static class RateOption {
+
+        final Option rate;
+        final Option reason;
+
+        RateOption(Option rate, Option reason) {
+            this.rate = rate;
+            this.reason = reason;
+        }
+
+        public Option getRate() {
+            return rate;
+        }
+
+        public Option getReason() {
+            return reason;
+        }
+
+        @Override
+        public String toString() {
+            return "RateOption{" +
+                    "rate=" + rate +
+                    ", reason=" + reason +
+                    '}';
+        }
+    }
+
     private final OptionsManager optionsManager;
     private final ProjectCustomFieldImporter projectCustomFieldImporter;
     private final JiraBaseUrls jiraBaseUrls;
@@ -77,15 +112,20 @@ public class RateCFType extends AbstractSingleFieldType<Option>
     private final CustomFieldManager customFieldManager;
     private final UserManager userManager;
     private final GroupManager groupManager;
+    private final GenericConfigManager genericConfigManager;
 
     private CustomField mpsLastWorkerCf;
 
+    public static final String PARENT_KEY = null;
+    public static final String CHILD_KEY = "1";
+    public static final PersistenceFieldType CASCADE_VALUE_TYPE = PersistenceFieldType.TYPE_LIMITED_TEXT;
+
     private static final Logger log = Logger.getLogger(RateCFType.class);
 
-    public RateCFType(CustomFieldValuePersister customFieldValuePersister, OptionsManager optionsManager, GenericConfigManager genericConfigManager, JiraBaseUrls jiraBaseUrls, RateService rateService, JiraAuthenticationContext jiraAuthenticationContext, CustomFieldManager customFieldManager, UserManager userManager, GroupManager groupManager)
+    public RateCFType(CustomFieldValuePersister customFieldValuePersister, OptionsManager optionsManager, GenericConfigManager genericConfigManager, JiraBaseUrls jiraBaseUrls, RateService rateService, JiraAuthenticationContext jiraAuthenticationContext, CustomFieldManager customFieldManager, UserManager userManager, GroupManager groupManager, GenericConfigManager genericConfigManager1)
     {
-        super(customFieldValuePersister, genericConfigManager);
         this.optionsManager = optionsManager;
+        this.genericConfigManager = genericConfigManager;
         this.jiraBaseUrls = jiraBaseUrls;
         this.rateService = rateService;
         this.jiraAuthenticationContext = jiraAuthenticationContext;
@@ -96,50 +136,172 @@ public class RateCFType extends AbstractSingleFieldType<Option>
        // mpsLastWorkerCf = customFieldManager.getCustomFieldObjectByName(MPSLASTWORKERCFNAME);
     }
 
-    @Override
+    public void removeValue(CustomField field, Issue issue, Option option)
+    {
+        //TODO remove value
+    }
+
     public Set<Long> remove(final CustomField field)
     {
-        final Set<Long> issues = super.remove(field);
         optionsManager.removeCustomFieldOptions(field);
-        return issues;
+        return new HashSet<Long>();
     }
 
-    @NotNull
-    @Override
-    protected PersistenceFieldType getDatabaseType()
+    public Options getOptions(final FieldConfig fieldConfig, final JiraContextNode jiraContextNode)
     {
-        return PersistenceFieldType.TYPE_LIMITED_TEXT;
-    }
-
-    @Override
-    protected Object getDbValueFromObject(Option customFieldObject)
-    {
-        return null;
-    }
-
-    @Override
-    protected Option getObjectFromDbValue(@NotNull Object databaseValue) throws FieldValidationException
-    {
-        return null;
+        return optionsManager.getOptions(fieldConfig);
     }
 
     /**
-     * This default implementation will remove all values from the custom field for an issue. Since there can only be
-     * one value for each CustomField instance, this implementation can safely ignore the objectValue
-     *
-     * @param option - ignored
+     * Returns a list of Issue Ids matching the "value" note that the value in this instance is the single object
      */
-    @Override
-    public void removeValue(final CustomField field, final Issue issue, final Option option)
+    public Set<Long> getIssueIdsWithValue(CustomField field, Option option)
     {
-        updateValue(field, issue, null);
+        //TODO do it
+        return new HashSet<Long>();
+    }
+    // -----------------------------------------------------------------------------------------------------  Validation
+
+    public void validateFromParams(CustomFieldParams relevantParams, ErrorCollection errorCollectionToAddTo, FieldConfig config)
+    {
+        if (relevantParams == null || relevantParams.isEmpty())
+        {
+            return;
+        }
+
+        String customFieldId = config.getCustomField().getId();
+
+        Option parentOption;
+        try
+        {
+            // Get the parent option
+            parentOption = extractOptionFromParams(PARENT_KEY, relevantParams);
+        }
+        catch (FieldValidationException e)
+        {
+            parentOption = null;
+        }
+
+        // If the selected parent option does not resolve to a value in the DB we should throw an error
+        if(parentOption == null)
+        {
+            List params = new ArrayList(relevantParams.getValuesForKey(null));
+            // If there was no value selected for the parent or the 'None/All' option was selected we let them pass
+            // and in this case we do not care about what the child values are since the parent is none.
+            if (!params.isEmpty() && !isNoneOptionSelected(params))
+            {
+                errorCollectionToAddTo.addError(customFieldId, getI18nBean().getText("admin.errors.option.invalid.parent", "'" + params.get(0).toString() + "'"), Reason.VALIDATION_FAILED);
+            }
+        }
+        else
+        {
+            // Since we are sure that the parent value is non-null and resovles to a valid option lets make sure that
+            // it is valid in the FieldConfig for where we are.
+            if(!parentOptionValidForConfig(config, parentOption))
+            {
+                errorCollectionToAddTo.addError(customFieldId, getI18nBean().getText("admin.errors.option.invalid.for.context",
+                        "'" + parentOption.getValue() + "'", "'" + config.getName() + "'"), Reason.VALIDATION_FAILED);
+            }
+            else
+            {
+                try
+                {
+                    // Get the param for this current option
+                    Collection valuesForChild = relevantParams.getValuesForKey(CHILD_KEY);
+                    if (valuesForChild != null)
+                    {
+                        List<String> params = new ArrayList<String>(valuesForChild);
+
+                        // Get the option object from the params only if they have not selected the "None/All" option
+                        Option currentOption = null;
+
+                        // If the user has not selected 'None/All' then we should try to resolve the option into an
+                        // object and then check that the object is valid in the FieldConfig for where we are.
+                        if(!isNoneOptionSelected(params))
+                        {
+                            // get the option from the params
+                            currentOption = extractOptionFromParams(CHILD_KEY, relevantParams);
+
+                            // check that the supplied option is valid in the config supplied
+                            if(!currentOptionValidForConfig(config, currentOption))
+                            {
+                                String optionValue = (currentOption == null) ?  params.get(0).toString() : currentOption.getValue();
+                                errorCollectionToAddTo.addError(customFieldId, getI18nBean().getText("admin.errors.option.invalid.for.context",
+                                        "'" + optionValue + "'", "'" + config.getName() + "'"), Reason.VALIDATION_FAILED);
+                                return;
+                            }
+                        }
+
+                        // make certain that the current option (if it exists) has a parent, that the parent is what we
+                        // expect it to be (the parent that was submitted as a param)
+                        if (currentOption != null && currentOption.getParentOption() != null
+                                && !parentOption.equals(currentOption.getParentOption()) )
+                        {
+                            errorCollectionToAddTo.addError(customFieldId, getI18nBean().getText("admin.errors.option.invalid.for.parent","'" + currentOption.getValue() + "'", "'" + parentOption.getValue() + "'"), Reason.VALIDATION_FAILED);
+                        }
+                    } else {
+                        if (parentOption.getSequence() == 0) {
+                            errorCollectionToAddTo.addError(customFieldId, "Give me a reason", Reason.VALIDATION_FAILED); //TODO check for child options non-existence
+                        }
+                    }
+                }
+                catch (FieldValidationException e)
+                {
+                    errorCollectionToAddTo.addError(customFieldId, e.getMessage(), Reason.VALIDATION_FAILED);
+                }
+            }
+        }
     }
 
-    @Override
-    public void createValue(CustomField field,
-                     Issue issue,
-                     Option value)  {
-        updateValue(field, issue, value);
+    private boolean isNoneOptionSelected(List<String> params)
+    {
+        String parentOptionParam = params.iterator().next();
+        return "-1".equals(parentOptionParam);
+    }
+
+    private boolean parentOptionValidForConfig(FieldConfig config, Option parentOption)
+    {
+        final Options options = optionsManager.getOptions(config);
+        if(options != null)
+        {
+            Collection rootOptions = options.getRootOptions();
+            if(rootOptions != null)
+            {
+                return rootOptions.contains(parentOption);
+            }
+        }
+        return false;
+    }
+
+    private boolean currentOptionValidForConfig(FieldConfig config, Option currentOption)
+    {
+        final Options options = optionsManager.getOptions(config);
+        if(options != null)
+        {
+            Collection rootOptions = options.getRootOptions();
+            if(rootOptions != null)
+            {
+                if (currentOption != null)
+                {
+                    return options.getOptionById(currentOption.getOptionId()) != null;
+                }
+            }
+        }
+        return false;
+    }
+
+    // --------------------------------------------------------------------------------------------- Persistance Methods
+
+    //these methods all operate on the object level
+
+    /**
+     * Create a cascading select-list instance for an issue.
+     *
+     * @param cascadingOptions
+     */
+    public void createValue(CustomField field, Issue issue, Map<String, Option> cascadingOptions)
+    {
+        updateValue(field, issue, cascadingOptions);
     }
 
     public static int denormalizeRating(int rating, int optionsSize) {
@@ -151,15 +313,274 @@ public class RateCFType extends AbstractSingleFieldType<Option>
     }
 
     @Override
-    public void updateValue(com.atlassian.jira.issue.fields.CustomField customField, com.atlassian.jira.issue.Issue issue, Option value) {
-        if (value == null) return;
-        Long rating = value.getSequence();
+    public void updateValue(com.atlassian.jira.issue.fields.CustomField customField, com.atlassian.jira.issue.Issue issue, Map<String, Option> cascadingOptions) {
+        Option parent = cascadingOptions.get(PARENT_KEY);
+        Option child = cascadingOptions.get(CHILD_KEY);
+        if (parent == null) return;
+        Long rating = parent.getSequence();
         Options options = optionsManager.getOptions(customField.getRelevantConfig(issue));
         int resultRating = denormalizeRating(rating.intValue(), options.size());
         //if (resultRating >= 0) resultRating++;    // it is for exclude 0
         User worker = getWorkerFromIssue(issue);
         if (worker == null) return;
-        rateService.addRating(issue.getKey(), jiraAuthenticationContext.getLoggedInUser().getName(), worker.getName(), resultRating, null);
+        String reasonId = null;
+        if (child != null) {
+            reasonId = child.getOptionId().toString();
+        }
+        rateService.addRating(issue.getKey(), jiraAuthenticationContext.getLoggedInUser().getName(), worker.getName(), resultRating, reasonId);
+    }
+
+    // --------------------------------------------------------------------------------------  CustomFieldParams methods
+
+    public Map<String, Option> getValueFromIssue(CustomField field, Issue issue) {
+        return null;
+    }
+
+    public Map<String, Option> getValueFromCustomFieldParams(CustomFieldParams relevantParams) throws FieldValidationException
+    {
+        if (relevantParams != null && !relevantParams.isEmpty())
+        {
+            return getOptionMapFromCustomFieldParams(relevantParams);
+        }
+        else
+        {
+            return null;
+        }
+
+    }
+
+    public Object getStringValueFromCustomFieldParams(CustomFieldParams parameters)
+    {
+        return parameters;
+    }
+
+    // -------------------------------------------------------------------------------------------------------- Defaults
+
+    @Nullable
+    public Map<String, Option> getDefaultValue(FieldConfig fieldConfig)
+    {
+        final Object o = genericConfigManager.retrieve(DEFAULT_VALUE_TYPE, fieldConfig.getId().toString());
+        if (o != null)
+        {
+            final CustomFieldParams params = new CustomFieldParamsImpl(fieldConfig.getCustomField(), o);
+            return getOptionMapFromCustomFieldParams(params);
+        }
+        else
+        {
+            return null;
+        }
+    }
+
+    public void setDefaultValue(FieldConfig fieldConfig, Map<String, Option> cascadingOptions)
+    {
+        if (cascadingOptions != null)
+        {
+            final CustomFieldParams customFieldParams = new CustomFieldParamsImpl(fieldConfig.getCustomField(), cascadingOptions);
+            customFieldParams.transformObjectsToStrings();
+            customFieldParams.setCustomField(null);
+
+            genericConfigManager.update(DEFAULT_VALUE_TYPE, fieldConfig.getId().toString(), customFieldParams);
+        }
+        else
+        {
+            genericConfigManager.update(DEFAULT_VALUE_TYPE, fieldConfig.getId().toString(), null);
+        }
+    }
+
+    // --------------------------------------------------------------------------------------------------  Miscellaneous
+
+    public String getChangelogValue(CustomField field, Map<String, Option> cascadingOptions)
+    {
+        if (cascadingOptions != null)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.append("Parent values: ");
+            Option parent = cascadingOptions.get(PARENT_KEY);
+            sb.append(parent.getValue()).append("(").append(parent.getOptionId()).append(")");
+            Option child = cascadingOptions.get(CHILD_KEY);
+            if (child != null)
+            {
+                sb.append("Level ").append(CHILD_KEY).append(" values: ");
+                sb.append(child.getValue()).append("(").append(child.getOptionId()).append(")");
+            }
+            return sb.toString();
+        }
+        else
+        {
+            return "";
+        }
+    }
+
+    public String getStringFromSingularObject(Option optionObject)
+    {
+        if (optionObject != null)
+        {
+            return optionObject.getOptionId().toString();
+        }
+        else
+        {
+            log.warn("Object passed '" + optionObject + "' is not an Option but is null");
+            return null;
+        }
+    }
+
+    public Option getSingularObjectFromString(String string) throws FieldValidationException
+    {
+        return getOptionFromStringValue(string);
+    }
+
+    @NotNull
+    public List<FieldConfigItemType> getConfigurationItemTypes()
+    {
+        final List<FieldConfigItemType> configurationItemTypes = super.getConfigurationItemTypes();
+        configurationItemTypes.add(new SettableOptionsConfigItem(this, optionsManager) {
+            @Override
+            public String getBaseEditUrl()
+            {
+                return "EditRateCustomFieldOptions!default.jspa";
+            }
+        });
+        return configurationItemTypes;
+    }
+
+    @NotNull
+    public Map<String, Object> getVelocityParameters(Issue issue, CustomField field, FieldLayoutItem fieldLayoutItem)
+    {
+        Map<String, Object> result = super.getVelocityParameters(issue, field, fieldLayoutItem);
+        final HttpServletRequest request = ServletActionContext.getRequest();
+        result.put("request", request);
+        User worker = getWorkerFromIssue(issue);
+        String fieldDescription = fieldLayoutItem.getFieldDescription();
+        if (worker != null)
+            fieldDescription += "<br>Оценка будет выставлена пользователю : " + worker.getDisplayName();
+        result.put("fieldDescription", fieldDescription);
+        return result;
+    }
+
+    //----------------------------------------------------------------------------------------- - Private Helper Methods
+
+    private Map<String, Option> getOptionMapFromCustomFieldParams(CustomFieldParams params) throws FieldValidationException
+    {
+        Option parentOption = extractOptionFromParams(PARENT_KEY, params);
+        Option childOption = extractOptionFromParams(CHILD_KEY, params);
+
+        Map<String, Option> options = new HashMap<String, Option>();
+        options.put(PARENT_KEY, parentOption);
+        if (childOption != null)
+        {
+            options.put(CHILD_KEY, childOption);
+        }
+
+        return options;
+    }
+
+    @Nullable
+    private Option extractOptionFromParams(String key, CustomFieldParams relevantParams) throws FieldValidationException
+    {
+        Collection<String> params = relevantParams.getValuesForKey(key);
+        if (params != null && !params.isEmpty())
+        {
+            String selectValue = params.iterator().next();
+            if (ObjectUtils.isValueSelected(selectValue) && selectValue != null)
+            {
+                return getOptionFromStringValue(selectValue);
+            }
+        }
+
+        return null;
+    }
+
+    @Nullable
+    private Option getOptionFromStringValue(String selectValue) throws FieldValidationException
+    {
+        final Long aLong = OptionUtils.safeParseLong(selectValue);
+        if (aLong != null)
+        {
+            final Option option = optionsManager.findByOptionId(aLong);
+            if (option != null)
+            {
+                return option;
+            }
+            else
+            {
+                throw new FieldValidationException("'" + aLong + "' is an invalid Option");
+            }
+        }
+        else
+        {
+            throw new FieldValidationException("Value: '" + selectValue + "' is an invalid Option");
+        }
+    }
+
+    @Nullable
+    private Option getOptionValueForParentId(CustomField field, @Nullable String sParentOptionId, Issue issue)
+    {
+        //TODO pretty one
+        /* Collection values;
+
+        values = customFieldValuePersister.getValues(field, issue.getId(), CASCADE_VALUE_TYPE, sParentOptionId);
+
+
+        if (values != null && !values.isEmpty())
+        {
+            String optionId = (String) values.iterator().next();
+            return optionsManager.findByOptionId(OptionUtils.safeParseLong(optionId));
+        }
+        else
+        {
+            return null;
+        }  */
+        return null;
+    }
+
+    // -------------------------------------------------------------------------------------------------- Compare
+    public int compare(@NotNull Map<String, Option> o1, @NotNull Map<String, Option> o2, FieldConfig fieldConfig)
+    {
+        Option option1 = o1.get(PARENT_KEY);
+        Option option2 = o2.get(PARENT_KEY);
+
+        int parentCompare = compareOption(option1, option2);
+        if (parentCompare == 0)
+        {
+            // Compare child Options, if parents are the same
+            Option childOption1 = o1.get(CHILD_KEY);
+            Option childOption2 = o2.get(CHILD_KEY);
+
+            return compareOption(childOption1, childOption2);
+        }
+        else
+        {
+            return parentCompare;
+        }
+    }
+
+    public int compareOption(@Nullable Option option1, @Nullable Option option2)
+    {
+        if (option1 == null && option2 == null) return 0;
+        else if (option1 == null) return -1;
+        else if (option2 == null) return 1;
+        else return option1.getSequence().compareTo(option2.getSequence());
+    }
+
+    public ProjectCustomFieldImporter getProjectImporter()
+    {
+        return this.projectCustomFieldImporter;
+    }
+
+    @Override
+    public Object accept(VisitorBase visitor)
+    {
+        if (visitor instanceof Visitor)
+        {
+            return ((Visitor) visitor).visitCascadingSelect(this);
+        }
+
+        return super.accept(visitor);
+    }
+
+    public interface Visitor<T> extends VisitorBase<T>
+    {
+        T visitCascadingSelect(RateCFType cascadingSelectCustomFieldType);
     }
 
     private User getWorkerFromIssue(Issue issue) {
@@ -177,100 +598,22 @@ public class RateCFType extends AbstractSingleFieldType<Option>
         return worker;
     }
 
-        @Override
-    public Option getSingularObjectFromString(final String string) throws FieldValidationException
+    /* @Override
+    public RateOption getSingularObjectFromString(final String string) throws FieldValidationException
     {
-        if ("-1".equals(string))
+        List<String> vals = Arrays.asList(string.split(":"));
+        Iterator<String> i = vals.iterator();
+        String rate = i.next();
+        if ("-1".equals(vals.iterator().next()))
         {
             return null;
         }
-        return getOptionFromStringValue(string);
-    }
-
-    private Option getOptionFromStringValue(String selectValue)
-            throws FieldValidationException
-    {
-        final Long aLong = OptionUtils.safeParseLong(selectValue);
-        if (aLong != null)
-        {
-            final Option option = optionsManager.findByOptionId(aLong);
-            if (option != null)
-            {
-                return option;
-            }
-            else
-            {
-                return null;
-            }
+        Option reason = null;
+        if (i.hasNext()) {
+            reason = getOptionFromStringValue(i.next());
         }
-        else
-        {
-            return null;
-        }
-    }
-
-    @Override
-    public String getStringFromSingularObject(final Option optionObject)
-    {
-        if (optionObject == null)
-        {
-            return null;
-        }
-
-        return optionObject.getOptionId().toString();
-    }
-
-    public Set<Long> getIssueIdsWithValue(final CustomField field, final Option option)
-    {
-        if (option != null)
-        {
-            return customFieldValuePersister.getIssueIdsWithValue(field, PersistenceFieldType.TYPE_LIMITED_TEXT, option.getOptionId().toString());
-        }
-        else
-        {
-            return Collections.emptySet();
-        }
-    }
-
-    @NotNull
-    @Override
-    public List<FieldConfigItemType> getConfigurationItemTypes()
-    {
-        final List<FieldConfigItemType> configurationItemTypes = super.getConfigurationItemTypes();
-        configurationItemTypes.add(new SettableOptionsConfigItem(this, optionsManager));
-        return configurationItemTypes;
-    }
-
-    @Override
-    public void validateFromParams(final CustomFieldParams relevantParams, final ErrorCollection errorCollectionToAddTo, final FieldConfig config)
-    {
-        final String selectedString = (String) relevantParams.getFirstValueForNullKey();
-
-        if (StringUtils.isNotBlank(selectedString) && !"-1".equals(selectedString))
-        {
-            // Test to see if the non blank value exists in the options
-            final Options options = optionsManager.getOptions(config);
-            final CustomField customField = config.getCustomField();
-            final String validOptions = createValidOptionsString(options);
-            Long optionId = null;
-            try
-            {
-                optionId = Long.valueOf(selectedString);
-            }
-            catch (NumberFormatException e)
-            {
-                errorCollectionToAddTo.addError(customField.getId(), getI18nBean().getText("admin.errors.invalid.value.passed.for.customfield",
-                        "'" + selectedString + "'", "'" + customField + "'", validOptions), Reason.VALIDATION_FAILED);
-            }
-            if ((options != null) && (options.getOptionById(optionId) == null))
-            {
-
-                errorCollectionToAddTo.addError(customField.getId(), getI18nBean().getText("admin.errors.invalid.value.passed.for.customfield",
-                        "'" + selectedString + "'", "'" + customField + "'", validOptions), Reason.VALIDATION_FAILED);
-            }
-        }
-
-    }
+        return new RateOption(getOptionFromStringValue(rate), reason);
+    }    */
 
     public void setDefaultValue(final FieldConfig fieldConfig, final Option option)
     {
@@ -282,34 +625,6 @@ public class RateCFType extends AbstractSingleFieldType<Option>
         genericConfigManager.update(CustomFieldType.DEFAULT_VALUE_TYPE, fieldConfig.getId().toString(), id);
     }
 
-    public Option getDefaultValue(final FieldConfig fieldConfig)
-    {
-        Long optionId = (Long) genericConfigManager.retrieve(CustomFieldType.DEFAULT_VALUE_TYPE, fieldConfig.getId().toString());
-        if (optionId == null)
-        {
-            return null;
-        }
-        return optionsManager.findByOptionId(optionId);
-    }
-
-    @Override
-    @NotNull
-    public Map<String, Object> getVelocityParameters(final Issue issue, final CustomField field, final FieldLayoutItem fieldLayoutItem)
-    {
-        Map<String, Object> result = super.getVelocityParameters(issue, field, fieldLayoutItem);
-        User worker = getWorkerFromIssue(issue);
-        String fieldDescription = fieldLayoutItem.getFieldDescription();
-        if (worker != null)
-            fieldDescription += "<br>Оценка будет выставлена пользователю : " + worker.getDisplayName();
-        result.put("fieldDescription", fieldDescription);
-        return result;
-    }
-
-    @Override
-    public String getChangelogString(CustomField field, Option value)
-    {
-        return value == null ? null :  value.getValue();
-    }
 
     private String createValidOptionsString(final Options options)
     {
@@ -330,111 +645,9 @@ public class RateCFType extends AbstractSingleFieldType<Option>
         return validOptions.toString();
     }
 
-    //------------------------------------------------------------------------------------------- MultiSettable Methods
-    public Options getOptions(final FieldConfig config, @Nullable final JiraContextNode jiraContextNode)
-    {
-        return optionsManager.getOptions(config);
-    }
-
-    // -------------------------------------------------------------------------------- Sortable custom field
-    @Override
-    public int compare(@NotNull final String customFieldObjectValue1, @NotNull final String customFieldObjectValue2, final FieldConfig fieldConfig)
-    {
-        final Options options = getOptions(fieldConfig, null);
-
-        if (options != null)
-        {
-            final int v1 = options.indexOf(options.getOptionById(Long.valueOf(customFieldObjectValue1)));
-            final int v2 = options.indexOf(options.getOptionById(Long.valueOf(customFieldObjectValue2)));
-
-            if (v1 > v2)
-            {
-                return 1;
-            }
-            else if (v1 < v2)
-            {
-                return -1;
-            }
-            else
-            {
-                return 0;
-            }
-
-        }
-        else
-        {
-            log.info("No options were found.");
-            return 0;
-        }
-    }
-
-    @Override
-    public ProjectCustomFieldImporter getProjectImporter()
-    {
-        return projectCustomFieldImporter;
-    }
-
-    @Override
-    public Object accept(VisitorBase visitor)
-    {
-        if (visitor instanceof Visitor)
-        {
-            return ((Visitor) visitor).visitSelect(this);
-        }
-
-        return super.accept(visitor);
-    }
-
     public Query getQueryForGroup(final String fieldID, String groupName)
     {
         return new TermQuery(new Term(fieldID + SelectStatisticsMapper.RAW_VALUE_SUFFIX, groupName));
-    }
-
-    public interface Visitor<T> extends VisitorBase<T>
-    {
-        T visitSelect(RateCFType selectCustomFieldType);
-    }
-
-    @Override
-    public FieldTypeInfo getFieldTypeInfo(FieldTypeInfoContext fieldTypeInfoContext)
-    {
-        // Get the allowed options
-        FieldConfig config = ((CustomField) fieldTypeInfoContext.getOderableField()).getRelevantConfig(fieldTypeInfoContext.getIssueContext());
-        Options options = optionsManager.getOptions(config);
-        Collection<CustomFieldOptionJsonBean> optionBeans = CustomFieldOptionJsonBean.shortBeans(options, jiraBaseUrls);
-
-        return new FieldTypeInfo(optionBeans, null);
-    }
-
-    @Override
-    public JsonType getJsonSchema(CustomField customField)
-    {
-        return JsonTypeBuilder.custom(JsonType.STRING_TYPE, getKey(), customField.getIdAsLong());
-    }
-
-    @Override
-    public FieldJsonRepresentation getJsonFromIssue(CustomField field, Issue issue, boolean renderedVersionRequested, @Nullable FieldLayoutItem fieldLayoutItem)
-    {
-        Option valueFromIssue = getValueFromIssue(field, issue);
-        if (valueFromIssue == null)
-        {
-            return new FieldJsonRepresentation(new JsonData(null));
-        }
-        return new FieldJsonRepresentation(new JsonData(CustomFieldOptionJsonBean.shortBean(valueFromIssue, jiraBaseUrls)));
-    }
-
-    @Override
-    public RestFieldOperationsHandler getRestFieldOperation(CustomField field)
-    {
-        return new SelectCustomFieldOperationsHandler(optionsManager, field, getI18nBean());
-    }
-
-    @Override
-    public JsonData getJsonDefaultValue(IssueContext issueCtx, CustomField field)
-    {
-        FieldConfig config = field.getRelevantConfig(issueCtx);
-        Option defaultValue = (Option) field.getCustomFieldType().getDefaultValue(config);
-        return defaultValue == null ? null : new JsonData(CustomFieldOptionJsonBean.shortBean(defaultValue, jiraBaseUrls));
     }
 
 

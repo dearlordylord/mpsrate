@@ -114,34 +114,6 @@ public class RateServiceImpl implements RateService {
         return res.toString();
     }
 
-    private String getOrderByClause(String[] order) {
-        if (order == null || order.length == 0) return "";
-        StringBuilder sb = new StringBuilder("ORDER BY ");
-        for (String field : order) {
-            sb.append("\"").append(StringEscapeUtils.escapeSql(field)).append("\"").append(',');
-        }
-        sb.deleteCharAt(sb.length()-1);
-        return sb.toString();
-    }
-
-    private List<String> filterNames(List<String> userName) {
-        List<String> result = new ArrayList<String>();
-        for (String name : userName) {
-            result.add("'" + StringEscapeUtils.escapeSql(name) + "'");
-        }
-        return result;
-    }
-
-    private String buildOrderClause(String[] order) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < order.length; ++i) {
-            String orderItem = order[i];
-            if (i != 0) sb.append(",\"");
-            sb.append(orderItem);
-            if (i != 0) sb.append("\"");
-        }
-        return sb.toString();
-    }
 
     private Rate[] _getRatesForIssue(String issueKey) {
         return ao.find(Rate.class, Query.select().where("ISSUE_KEY = ?", issueKey));

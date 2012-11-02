@@ -1,0 +1,36 @@
+#disable_html_escaping()
+#if (!$request || !$request.getAttribute("cascade"))
+    $!request.setAttribute("cascade" , "true")
+#end
+#if ($value.getValuesForKey(null) && !$value.getValuesForKey(null).empty)
+    #set ($selectedParent = $value.getValuesForKey(null).iterator().next())
+#end
+#if ($value.getValuesForKey('1') && !$value.getValuesForKey('1').empty)
+    #set ($selectedChild = $value.getValuesForKey('1').iterator().next())
+#end
+$!{auiparams.put("controlHeaderClass", "aui-field-cascadingselect")}
+#customControlHeader ($action $customField.id $customField.name $fieldLayoutItem.required $displayParameters $auiparams)
+    <fieldset class="group select cascadingselect-radio-parent">
+    #foreach ($option in $configs.options.rootOptions)
+        #if(!$option.disabled || $option.disabled == false || ($selectedParent && $selectedParent == $option.optionId.toString()))
+            #if ($value && $value.equals($option.optionId.toString())) #set ($checked = ' checked="checked"') #else #set ($checked = '') #end
+            <div class="radio" style="padding:0">
+            <input$!{checked} class="option-group-$option.optionId" id="${customField.id}-${velocityCount}" name="${customField.id}" type="radio" value="$option.optionId" />
+            <label for="${customField.id}-${velocityCount}">$cfValueEncoder.encodeForHtml($option.value)</label>
+            </div>
+        #end
+    #end
+    </fieldset>
+    <select class="select cascadingselect-radio-child" id="${customField.id}:1" name="${customField.id}:1">
+        <option class="default-option" value="">Причина: </option>
+        #foreach ($parentOption in $configs.options.rootOptions)
+            <option class="option-group-$parentOption.optionId" value="">Причина: </option>
+            #foreach ($childOption in $parentOption.childOptions)
+                #if(!$childOption.disabled || $childOption.disabled == false || ($selectedChild && $selectedChild == $childOption.optionId.toString()))
+                    <option class="option-group-$parentOption.optionId" value="$childOption.optionId"#if ($selectedChild && $selectedChild == $childOption.optionId.toString()) selected="selected"#end>$cfValueEncoder.encodeForHtml($childOption.value)</option>
+                #end
+            #end
+        #end
+    </select>
+#customControlFooter ($action $customField.id $fieldLayoutItem.fieldDescription $displayParameters $auiparams)
+$!{auiparams.clear()}

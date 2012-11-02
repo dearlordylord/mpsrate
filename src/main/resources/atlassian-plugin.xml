@@ -7,10 +7,13 @@
 
     <customfield-type key="rate" name="Rate field"
                       class="ru.megaplan.jira.plugins.mpsrate.customfield.RateCFType">
-        <resource type="velocity" name="view" location="templates/plugins/fields/view/view-number.vm"/>
+      <!--  <resource type="velocity" name="view" location="templates/plugins/fields/view/view-number.vm"/>  -->
        <!-- <resource type="velocity" name="column-view" location="templates/plugins/fields/view/view-limited-text.vm"/> -->
-        <resource type="velocity" name="edit" location="templates/fields/edit/edit-rate.vm"/>
-        <resource type="velocity" name="xml" location="templates/plugins/fields/xml/xml-number.vm"/>
+      <!--  <resource type="velocity" name="edit" location="templates/fields/edit/edit-rate.vm"/>
+        <resource type="velocity" name="xml" location="templates/plugins/fields/xml/xml-number.vm"/>  -->
+        <resource type="velocity" name="view" location="templates/plugins/fields/view/view-cascadingselect.vm"/>
+        <resource type="velocity" name="edit" location="templates/fields/edit/edit-cascadingselect.vm"/>
+        <resource type="velocity" name="xml" location="templates/plugins/fields/xml/xml-cascadingselect.vm"/>
     </customfield-type>
 
     <customfield-type key="workers" name="MPS Last Worker"
@@ -74,6 +77,11 @@
         <resource type="download" name="pickers.js" location="js/pickers.js" />
     </web-resource>
 
+    <web-resource key="initOptionsCascadingSelect" name="initOptionsCascadingSelect">
+        <context>atl.general</context>
+        <resource type="download" name="initOptionsCascadingSelect.js" location="/js/initOptionsCascadingSelect.js"/>
+    </web-resource>
+
     <gadget key="mpsrategadget" name="mpsrategadget" location="gadget/mpsrategadget.xml">
         <param name="roles-required">browse</param>
         <resource type="download" name="mpsrate-screenshot.png" location="images/mpsrate-screenshot.png"/>
@@ -90,6 +98,22 @@
         <resource type="velocity" name="view" location="templates/panel/rates.vm"/>
         <supports-ajax-load>true</supports-ajax-load>
     </issue-tabpanel>
+
+    <webwork1 key="cascading-select-cf-type-configuration" name="Options Cascading Select Field Configuration for Rate CF">
+        <description>Options Cascading Select Field Configuration for Rate CF.</description>
+        <actions>
+            <action name="ru.megaplan.jira.plugins.mpsrate.action.EditRateCascadingSelectCustomFieldOptions" alias="EditRateCustomFieldOptions" roles-required="admin">
+                <view name="input">/secure/admin/views/customfields/editcustomfieldoptions.jsp</view>
+                <view name="error">/secure/admin/views/customfields/editcustomfieldoptions.jsp</view>
+                <view name="confirmdelete">/secure/admin/views/customfields/deletecustomfieldoption.jsp</view>
+                <view name="edit">/secure/admin/views/customfields/editcustomfieldoptions.jsp</view>
+
+                <command name="configureOption" alias="ConfigureCustomFieldOptions">
+                    <view name="error">/secure/admin/views/customfields/editcustomfieldoptions.jsp</view>
+                </command>
+            </action>
+        </actions>
+    </webwork1>
 
 
 

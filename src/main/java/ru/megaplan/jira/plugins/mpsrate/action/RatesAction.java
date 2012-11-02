@@ -51,7 +51,7 @@ public class RatesAction extends AbstractIssueAction {
     protected void populateVelocityParams(Map map) {
         UserManager userManager = ComponentAccessor.getUserManager();
         Collection<CustomField> rateCustomFields = MpsRateGadgetResource.getCustomFieldsByIssueAndType(RateCFType.class, issue);
-        Map<Integer, String> rateNames = MpsRateGadgetResource.getTypesMapping(rateCustomFields.iterator().next(), issue);
+        Map<Integer, String> rateNames = MpsRateGadgetResource.getTypesMapping(rateCustomFields.iterator().next(), issue, null);
         List<Rate> rates = rateService.getRatesForIssue(issue.getKey());
         List<RateBean> rateBeans = new ArrayList<RateBean>();
         for (Rate rate : rates) {

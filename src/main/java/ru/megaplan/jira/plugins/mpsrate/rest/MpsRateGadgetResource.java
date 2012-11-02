@@ -59,26 +59,19 @@ public class MpsRateGadgetResource {
 
     private final static Logger log = Logger.getLogger(MpsRateGadgetResource.class);
 
+    private final static List<String> defaultReasons = new ArrayList<String>();
+
     private static final String USERS = "users";
     private static final String DAYSBEFORE = "daysBefore";
-    private static final String USEDATES = "useDates";
     private static final String DATE_START = "dateStart";
     private static final String DATE_END = "dateEnd";
-    private static final String VIEW_DETAILS = "viewDetails";
-    private static final String VIEW_DIAGRAM = "viewDiagram";
     private static final String WIDTH = "width";
     private static final String HEIGHT = "height";
     private static final String IS_CUMULATIVE = "isCumulative";
     private static final String SHOW_OLD_RATES = "showOldRates";
+    private static final String REASONS = "reasons";
 
-    private final JiraAuthenticationContext jiraAuthenticationContext;
-    private final SearchService searchService;
     private final UserManager userManager;
-    private final StatusManager statusManager;
-    private final JiraBaseUrls jiraBaseUrls;
-    private final CustomFieldManager customFieldManager;
-    private final CustomFieldValuePersister customFieldValuePersister;
-    private final JqlQueryParser jqlQueryParser;
     private final RateService rateService;
     private final TimeZoneManager timeZoneManager;
     private final OptionsManager optionsManager;
@@ -88,23 +81,9 @@ public class MpsRateGadgetResource {
     private static final String RATECFNAME = "MPS Rate";
 
 
-    public MpsRateGadgetResource(JiraAuthenticationContext jiraAuthenticationContext,
-                                 SearchService searchService,
-                                 UserManager userManager,
-                                 StatusManager statusManager,
-                                 JiraBaseUrls jiraBaseUrls,
-                                 CustomFieldManager customFieldManager,
-                                 CustomFieldValuePersister customFieldValuePersister,
-                                 JqlQueryParser jqlQueryParser,
+    public MpsRateGadgetResource(UserManager userManager,
                                  RateService rateService, TimeZoneManager timeZoneManager, OptionsManager optionsManager, IssueManager issueManager) {
-        this.jiraAuthenticationContext = jiraAuthenticationContext;
-        this.searchService = searchService;
         this.userManager = userManager;
-        this.statusManager = statusManager;
-        this.jiraBaseUrls = jiraBaseUrls;
-        this.customFieldManager = customFieldManager;
-        this.customFieldValuePersister = customFieldValuePersister;
-        this.jqlQueryParser = jqlQueryParser;
         this.rateService = rateService;
         this.timeZoneManager = timeZoneManager;
         this.optionsManager = optionsManager;
@@ -123,8 +102,13 @@ public class MpsRateGadgetResource {
                                   @QueryParam (WIDTH) @DefaultValue ("450") final int width,
                                   @QueryParam (HEIGHT) @DefaultValue ("300") final int height,
                                   @QueryParam (IS_CUMULATIVE) @DefaultValue ("true") final boolean isCumulative,
-                                  @QueryParam (SHOW_OLD_RATES) @DefaultValue("true") final boolean showOldRates
+                                  @QueryParam (SHOW_OLD_RATES) @DefaultValue("true") final boolean showOldRates,
+                                  @QueryParam (REASONS) final String reasonIdsString
                                   ) throws SearchException, ParseException, IOException {
+        List<String> reasonIds;
+        if (!reasonIdsString.isEmpty()) {
+            reasonIds = Arrays.asList(reasonIdsString.split("\\|"));
+        } else reasonIds = new ArrayList<String>();
         List<String> userNamesList = validateUsers(usersInString);
         Date start;
         Date end;
@@ -143,23 +127,27 @@ public class MpsRateGadgetResource {
             toStartOfDay(cal);
             start = cal.getTime();
         }
+
+        List<String> reasons = new ArrayList<String>();
+        if (reasonIds != null && !reasonIds.isEmpty() && !(reasonIds.get(0).equals("-1"))) {
+            reasons.addAll(reasonIds);
+        }
+
         List<RatesResult> ratesResults = new ArrayList<RatesResult>();
         if (userNamesList.size() > 1)
-            ratesResults.add(createRatesResult(userNamesList, start, end, width, height, isCumulative, showOldRates));
+            ratesResults.add(createRatesResult(userNamesList, start, end, width, height, isCumulative, showOldRates, reasons));
         for (String userLogin : userNamesList) {
-            RatesResult ratesResult = createRatesResult(Arrays.asList(new String[]{userLogin}), start, end, width, height, isCumulative, showOldRates);
+            RatesResult ratesResult = createRatesResult(Arrays.asList(new String[]{userLogin}), start, end, width, height, isCumulative, showOldRates, reasons);
             if (ratesResult == null) continue;
             ratesResults.add(ratesResult);
         }
         return Response.ok(ratesResults).cacheControl(noCache()).build();
     }
 
-    private RatesResult createRatesResult(List<String> userLogins, Date start, Date end, int width, int height, boolean isCumulative, boolean showOldRates) {
-        if (userLogins.size() > 1) log.warn("userLogins : " + userLogins);
+    private RatesResult createRatesResult(List<String> userLogins, Date start, Date end, int width, int height, boolean isCumulative, boolean showOldRates, List<String> reasonIds) {
         Issue issueForConfig = null;
         CustomField rateCustomField = null;
         List<XMLRate> ratesForUser = getRatesForUser(userLogins, start, end);
-        if (userLogins.size() > 1 ) log.warn("ratesForUser : " + ratesForUser);
         if (ratesForUser.size() > 0) {
             for (XMLRate rate : ratesForUser) {
                 Issue issue = issueManager.getIssueObject(rate.getIssueKey());
@@ -176,13 +164,51 @@ public class MpsRateGadgetResource {
         if (issueForConfig == null) {
             return null;
         }
-        Map<Integer, String> typesMapping = getTypesMapping(rateCustomField, issueForConfig);
+        Map<Integer, String> typesMapping = getTypesMapping(rateCustomField, issueForConfig, reasonIds);
 
-        Map<Integer, List<XMLRate>> mapByRating = getMapByRating(ratesForUser);
-        if (userLogins.size() > 1) log.warn("mapByRating : " + mapByRating);
+        Map<Integer, List<XMLRate>> mapByRating;
+        long summarySum = 0;
+        final Map<String, Long> reasonPriorities = new HashMap<String, Long>();
+        if (reasonIds.isEmpty()) {
+            mapByRating = getMapByRating(ratesForUser);
+            summarySum = ratesForUser.size();
+        }
+        else {
+            List<XMLRate> rs = new ArrayList<XMLRate>();
+            for (String rid : reasonIds) {
+                Long id = Long.parseLong(rid);
+                Option o = optionsManager.findByOptionId(id);
+                if (o != null) {
+                    reasonPriorities.put(rid, o.getSequence());
+                }
+            }
+            //ratesForUser.clear();
+            for (XMLRate r : ratesForUser) {                     // sort of fuckin filter
+                if (reasonPriorities.get(r.getComment()) != null) {
+                    rs.add(r);
+                    //ratesForUser.add(r);
+                }
+
+            }
+            Collections.sort(rs, new Comparator<XMLRate>() {
+                @Override
+                public int compare(XMLRate xmlRate, XMLRate xmlRate1) {
+                    Long p1 = reasonPriorities.get(xmlRate.getComment());
+                    Long p2 = reasonPriorities.get(xmlRate1.getComment());
+                    if (p1 == null) p1 = -100500L;
+                    if (p2 == null) p2 = -100500L;
+                    int r = p1.compareTo(p2);
+                    if (r == 0) r = Long.valueOf(xmlRate.getWhen()).compareTo(xmlRate1.getWhen());
+                    if (r == 0) r = xmlRate.getIssueKey().compareTo(xmlRate1.getIssueKey());
+                    return r;
+                }
+            });
+            mapByRating = getMapByReason(rs, reasonPriorities);
+            summarySum = rs.size();
+        }
         Map<Integer, ? extends  Number> oldRatesSums = null;
-        if (showOldRates) oldRatesSums = getOldRatesSums(userLogins, start);
-        Chart chart = null;
+        if (showOldRates) oldRatesSums = getOldRatesSums(userLogins, start, reasonIds, reasonPriorities);
+        Chart chart;
         try {
             chart = getMpsRateChart(mapByRating, oldRatesSums, width, height, start, end, typesMapping, isCumulative);
         } catch (IOException e) {
@@ -203,7 +229,7 @@ public class MpsRateGadgetResource {
         List<String> userDisplayNames = getUserDisplayNames(users);
         RatesResult ratesResult = new RatesResult(userDisplayNames,
                 userLogins,
-                new RatesSummary(dateFormat.format(start), dateFormat.format(end), ratesForUser.size()),
+                new RatesSummary(dateFormat.format(start), dateFormat.format(end), (int) summarySum),
                 ratesDetails,
                 xmlChart, typesMapping
         );
@@ -343,26 +369,61 @@ public class MpsRateGadgetResource {
         return result;  //To change body of created methods use File | Settings | File Templates.
     }
 
+    private Map<Integer, List<XMLRate>> getMapByReason(List<XMLRate> ratesForUser, Map<String, Long> reasonPriorities) {
+
+        Map<Integer, List<XMLRate>> result = new LinkedHashMap<Integer, java.util.List<XMLRate>>();
+        List<XMLRate> ratesForRating = new ArrayList<XMLRate>();
+        String currentCt = null;
+        for (XMLRate rate : ratesForUser) {
+            String ct = rate.getComment();
+            if (currentCt == null) currentCt = ct;
+            if (!currentCt.equals(ct)) {
+                result.put(reasonPriorities.get(currentCt).intValue(), Lists.newArrayList(ratesForRating));
+                currentCt = ct;
+                ratesForRating.clear();
+            }
+            ratesForRating.add(rate);
+
+        }
+        if (!ratesForRating.isEmpty()) {
+            result.put(reasonPriorities.get(currentCt).intValue(), ratesForRating);
+        }
+
+        return result;  //To change body of created methods use File | Settings | File Templates.
+    }
+
     //returns rates sorted by rating, when
     private List<XMLRate> getRatesForUser(List<String> userNames, Date start, Date end) {
         List<XMLRate> xmlRates = new ArrayList<XMLRate>();
         Collection<Rate> sqlRates = rateService.getRatesForUser(userNames, start, end, "RATING", "WHEN" ,"ISSUE_KEY");
         for (Rate sqlRate : sqlRates) {
-            xmlRates.add(new XMLRate(sqlRate));
+            XMLRate rate = new XMLRate(sqlRate);
+            xmlRates.add(rate);
         }
-
         return xmlRates;
     }
 
-    private Map<Integer, ? extends Number> getOldRatesSums(List<String> userLogins, Date start) {
+    private Map<Integer, ? extends Number> getOldRatesSums(List<String> userLogins, Date start, List<String> reasonIds, Map<String, Long> reasonPriorities) {
         Map<Integer, MutableDouble> result = new HashMap<Integer, MutableDouble>();
         Collection<Rate> sqlRates = rateService.getRatesForUser(userLogins, new Date(0), start);
         for (Rate sqlRate : sqlRates) {
-            Integer rating = sqlRate.getRating();
-            MutableDouble currentSum = result.get(rating);
+            Integer groupField = 0;
+            if (reasonIds.isEmpty()) {
+                Integer rating = sqlRate.getRating();
+                groupField = rating;
+            } else {
+                Long reasonPrior = reasonPriorities.get(sqlRate.getComment());
+                if (reasonPrior != null) {
+                    groupField = reasonPrior.intValue();
+                } else {
+                    continue;
+                }
+            }
+
+            MutableDouble currentSum = result.get(groupField);
             if (currentSum == null) {
                 currentSum = new MutableDouble();
-                result.put(rating, currentSum);
+                result.put(groupField, currentSum);
             }
             currentSum.add(1);
         }
@@ -398,15 +459,29 @@ public class MpsRateGadgetResource {
         return Response.ok().cacheControl(noCache()).build();
     }
 
-    public static Map<Integer,String> getTypesMapping(CustomField ratesCustomField, Issue issueForConfig) {
+    public static Map<Integer,String> getTypesMapping(CustomField ratesCustomField, Issue issueForConfig, List<String> reasonIds) {
         IssueManager issueManager = ComponentAccessor.getIssueManager();
         OptionsManager optionsManager = ComponentAccessor.getOptionsManager();
         Map<Integer, String> typesMapping = new LinkedHashMap<Integer, String>();
-        Options options = optionsManager.getOptions(ratesCustomField.getRelevantConfig(issueForConfig));
-        for (Option o : options.getRootOptions()) {
-            int denormalizedOption = RateCFType.denormalizeRating(o.getSequence().intValue(), options.size());
-            typesMapping.put(Integer.valueOf(denormalizedOption), o.getValue());
+        Options optionz = optionsManager.getOptions(ratesCustomField.getRelevantConfig(issueForConfig));
+        List<Option> optionList = new ArrayList<Option>();
+        if (reasonIds.isEmpty()) {
+            optionList.addAll(optionz.getRootOptions());
+            for (Option o : optionList) {
+                int denormalizedOption = RateCFType.denormalizeRating(o.getSequence().intValue(), optionList.size());
+                typesMapping.put(denormalizedOption, o.getValue());
+            }
+        } else {
+            for (String sid : reasonIds) {
+                Long id = Long.parseLong(sid);
+                Option child = optionz.getOptionById(id);
+                if (child != null) optionList.add(child);
+            }
+            for (Option o : optionList) {
+                typesMapping.put(o.getSequence().intValue(), o.getValue());
+            }
         }
+
         return typesMapping;
     }
 
@@ -603,6 +678,7 @@ public class MpsRateGadgetResource {
         private String whom;
         private Integer rate;
         private long when;
+        private String comment;
 
         public XMLRate(Rate sqlRate) {
             this.issueKey = sqlRate.getIssueKey();
@@ -610,7 +686,7 @@ public class MpsRateGadgetResource {
             this.whom = sqlRate.getWhom();
             this.rate = sqlRate.getRating();
             this.when = sqlRate.getWhen().getTime();
-
+            this.comment = sqlRate.getComment();
         }
 
         public String getIssueKey() {
@@ -653,6 +729,14 @@ public class MpsRateGadgetResource {
             this.when = when;
         }
 
+        public String getComment() {
+            return comment;
+        }
+
+        public void setComment(String comment) {
+            this.comment = comment;
+        }
+
         @Override
         public String toString() {
             return "XMLRate{" +
@@ -660,7 +744,8 @@ public class MpsRateGadgetResource {
                     ", who='" + who + '\'' +
                     ", whom='" + whom + '\'' +
                     ", rate=" + rate +
-                    ", when=" + new Date(when) +
+                    ", when=" + when +
+                    ", comment='" + comment + '\'' +
                     '}';
         }
     }

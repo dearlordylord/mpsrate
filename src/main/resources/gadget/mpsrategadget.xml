@@ -28,6 +28,7 @@
     <UserPref name="daysBefore" datatype="hidden" default_value="30"/>
     <UserPref name="isCumulative" datatype="hidden" default_value="true" />
     <UserPref name="showOldRates" datatype="hidden" default_value="true" />
+    <UserPref name="reasons" datatype="hidden" default_value="" />
 
     <UserPref name="refresh" datatype="hidden" default_value="false" />
     <Content type="html" view="profile,canvas,home">
@@ -98,6 +99,13 @@
                                         }
                                     ]
                                 },
+                                {
+                                    userpref: "reasons",
+                                    label: "Причины",
+                                    type: "multiselect",
+                                    selected: gadget.getPref("reasons"),
+                                    options: args.reasons
+                                },
                                 AJS.gadget.fields.nowConfigured()
                             ]
                         };
@@ -107,6 +115,10 @@
                             {
                                 key: "users",
                                 ajaxOptions: "/rest/mpsrate/latest/who/group/mps-support"
+                            },
+                            {
+                                key: "reasons",
+                                ajaxOptions: "/rest/mpsrate/latest/reasons/all"
                             }
                         ];
                     }()
@@ -120,6 +132,8 @@
 
 
                         var gadget = this;
+
+                        console.warn(args);
 
                         var dateStart = args.data[0].ratesSummary.dateStart;
                         var dateEnd = args.data[0].ratesSummary.dateEnd;
@@ -399,6 +413,7 @@
                                         daysBefore : gadgets.util.unescapeString(this.getPref("daysBefore")),
                                         isCumulative : gadgets.util.unescapeString(this.getPref("isCumulative")),
                                         showOldRates : gadgets.util.unescapeString(this.getPref("showOldRates")),
+                                        reasons: gadgets.util.unescapeString(this.getPref("reasons")),
                                         width: width,
                                         height: height
                                     }
